@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discord Clone P2P - Com Volume</title>
+    <title>Discord Clone P2P - Conexão Direta</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #36393f; color: white; margin: 0; padding: 20px; text-align: center; }
@@ -25,7 +25,6 @@
         .success { color: #43b581 !important; }
         .error { color: #ed4245 !important; }
 
-        /* Estilo das barras de volume */
         .volume-control { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; background: #292b2f; padding: 8px; border-radius: 5px; }
         .volume-control label { font-size: 12px; color: #b9bbbe; font-weight: bold;}
         input[type=range] { width: 100px; accent-color: #7289da; cursor: pointer; }
@@ -35,7 +34,7 @@
 
     <div class="container">
         <h1>Meu Servidor Local</h1>
-        <div id="status">⏳ Inicializando sistema...</div>
+        <div id="status">⏳ Carregando permissões de áudio...</div>
 
         <div class="link-box">
             <strong>Envie este link para seu amigo entrar:</strong><br>
@@ -48,25 +47,20 @@
             <button id="btnScreen" onclick="shareScreen()">💻 Transmitir Tela</button>
         </div>
 
-        <!-- Controle de volume da VOZ do amigo -->
         <div class="volume-control" id="micVolumeBox" style="display: none;">
             <label for="micVolume">🔊 Volume da Voz do Amigo:</label>
             <input type="range" id="micVolume" min="0" max="1" step="0.05" value="1" oninput="changeMicVolume(this.value)">
         </div>
 
         <div class="video-grid">
-            <!-- Sua própria tela sendo transmitida -->
             <div class="video-box" id="boxLocal" style="display: none;">
                 <h3>Sua Transmissão</h3>
                 <video id="localVideo" autoplay playsinline muted></video>
             </div>
 
-            <!-- Tela que o amigo estiver compartilhando -->
             <div class="video-box" id="boxRemote" style="display: none;">
                 <h3>Transmissão do Amigo</h3>
                 <video id="remoteVideo" autoplay playsinline></video>
-                
-                <!-- Controle de volume da LIVE (Jogo/Tela) do amigo -->
                 <div class="volume-control">
                     <label for="screenVolume">🎵 Volume da Live:</label>
                     <input type="range" id="screenVolume" min="0" max="1" step="0.05" value="1" oninput="changeScreenVolume(this.value)">
@@ -74,12 +68,11 @@
             </div>
         </div>
 
-        <!-- Áudio invisível do microfone do amigo -->
         <audio id="remoteAudio" autoplay></audio>
     </div>
 
     <script>
-        let peer;
+        let peer = null;
         let localMicStream = null;
         let localScreenStream = null;
         let connectedPeers = new Set();
@@ -93,65 +86,94 @@
             statusEl.className = type;
         }
 
-        // Inicia o PeerJS
-        peer = new Peer();
+        // Configuração do PeerJS com Servidores STUN do Google (Garante a conexão P2P entre redes diferentes)
+        const peerConfig = {
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' }
+                ]
+            }
+        };
 
-        peer.on('open', (id) => {
-            const urlParams = new URLSearchParams(window.location.search);
-            const roomToJoin = urlParams.get('room');
-            
-            const inviteUrl = window.location.origin + window.location.pathname + "?room=" + id;
-            document.getElementById('inviteLink').value = inviteUrl;
-            
-            if (!roomToJoin) {
-                updateStatus("✅ Sala criada! Você já pode transmitir sua tela ou esperar alguém entrar.", "success");
+        async function initApp() {
+            // 1. Garante que o áudio do microfone carregou antes de tentar conectar
+            try {
+                localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            } catch (err) {
+                console.warn("Microfone não encontrado ou bloqueado. Criando faixa de áudio padrão.", err);
+                // Cria um canal de áudio silencioso para a conexão não falhar
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const dst = osc.connect(ctx.createMediaStreamDestination());
+                osc.start();
+                localMicStream = dst.stream;
+                localMicStream.getAudioTracks()[0].enabled = false;
             }
 
-            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-                localMicStream = stream;
+            // 2. Inicializa a rede P2P
+            peer = new Peer(peerConfig);
+
+            peer.on('open', (id) => {
+                const urlParams = new URLSearchParams(window.location.search);
+                const roomToJoin = urlParams.get('room');
                 
+                const inviteUrl = window.location.origin + window.location.pathname + "?room=" + id;
+                document.getElementById('inviteLink').value = inviteUrl;
+
                 if (roomToJoin) {
-                    updateStatus("🔄 Link detectado! Conectando ao seu amigo...");
-                    const conn = peer.connect(roomToJoin);
-                    conn.on('open', () => updateStatus("✅ Conectado ao servidor do amigo! Carregando voz...", "success"));
-
-                    const call = peer.call(roomToJoin, localMicStream);
-                    handleCallEvent(call);
+                    updateStatus("🔄 Conectando direto ao seu amigo...", "normal");
+                    connectToFriend(roomToJoin);
+                } else {
+                    updateStatus("✅ Sala pronta! Envie o link para seu amigo.", "success");
                 }
-            }).catch(err => {
-                alert("Permita o uso do microfone para poder falar!");
             });
-        });
 
-        peer.on('connection', (conn) => {
-            updateStatus("⚠️ Um amigo está se conectando à sua sala...", "normal");
-        });
+            // Quando recebemos uma chamada do amigo
+            peer.on('call', (call) => {
+                connectedPeers.add(call.peer);
+                call.answer(localMicStream);
+                setupCallListeners(call);
 
-        peer.on('call', (call) => {
-            connectedPeers.add(call.peer);
-            updateStatus("🟢 Amigo na chamada! Vocês já podem se falar.", "success");
-            
-            // Mostra o controle de volume da voz assim que alguém entra
-            document.getElementById('micVolumeBox').style.display = 'flex';
-            
-            call.answer(localMicStream);
+                // Se já estiver transmitindo a tela, envia ela para quem acabou de entrar
+                if (localScreenStream) {
+                    setTimeout(() => {
+                        const screenCall = peer.call(call.peer, localScreenStream);
+                        setupCallListeners(screenCall);
+                    }, 1000);
+                }
+            });
 
-            if (localScreenStream) {
-                setTimeout(() => {
-                    peer.call(call.peer, localScreenStream);
-                }, 1000);
+            peer.on('error', (err) => {
+                console.error("Erro PeerJS:", err);
+                updateStatus("❌ Erro de Conexão: " + err.type, "error");
+            });
+        }
+
+        // Função para se conectar ao dono da sala
+        function connectToFriend(friendId) {
+            connectedPeers.add(friendId);
+            const call = peer.call(friendId, localMicStream);
+            if (call) {
+                setupCallListeners(call);
+            } else {
+                updateStatus("❌ Falha ao estabelecer chamada.", "error");
             }
+        }
 
-            handleCallEvent(call);
-        });
-
-        function handleCallEvent(call) {
+        // Escutadores de eventos de áudio e vídeo da chamada
+        function setupCallListeners(call) {
             call.on('stream', (remoteStream) => {
+                updateStatus("🟢 Conectado e transmitindo!", "success");
+                
+                // Se o fluxo contiver vídeo (Tela)
                 if (remoteStream.getVideoTracks().length > 0) {
                     const videoObj = document.getElementById('remoteVideo');
                     videoObj.srcObject = remoteStream;
                     document.getElementById('boxRemote').style.display = 'block';
                 } 
+                // Se for apenas áudio (Voz)
                 else {
                     const audioObj = document.getElementById('remoteAudio');
                     audioObj.srcObject = remoteStream;
@@ -159,13 +181,24 @@
                 }
             });
 
+            // Monitora desconexões
+            if (call.peerConnection) {
+                call.peerConnection.oniceconnectionstatechange = () => {
+                    const state = call.peerConnection.iceConnectionState;
+                    if (state === 'failed' || state === 'disconnected') {
+                        updateStatus("⚠️ Conexão perdida. Verifique sua rede.", "error");
+                    }
+                };
+            }
+
             call.on('close', () => {
-                updateStatus("❌ Seu amigo saiu da chamada.", "error");
+                updateStatus("❌ Seu amigo saiu.", "error");
                 document.getElementById('boxRemote').style.display = 'none';
                 document.getElementById('micVolumeBox').style.display = 'none';
             });
         }
 
+        // Compartilhamento de Tela
         async function shareScreen() {
             try {
                 localScreenStream = await navigator.mediaDevices.getDisplayMedia({
@@ -183,16 +216,14 @@
                 btn.onclick = stopScreenShare;
 
                 connectedPeers.forEach(peerId => {
-                    peer.call(peerId, localScreenStream);
+                    const screenCall = peer.call(peerId, localScreenStream);
+                    setupCallListeners(screenCall);
                 });
 
                 localScreenStream.getVideoTracks()[0].onended = () => stopScreenShare();
 
             } catch (err) {
                 console.error("Erro ao compartilhar tela:", err);
-                if (err.name === "NotAllowedError") {
-                    alert("Você cancelou o compartilhamento ou não deu permissão.");
-                }
             }
         }
 
@@ -209,8 +240,9 @@
             btn.onclick = shareScreen;
         }
 
+        // Controles de Mute e Volume
         function toggleMic() {
-            if (localMicStream) {
+            if (localMicStream && localMicStream.getAudioTracks().length > 0) {
                 micMuted = !micMuted;
                 localMicStream.getAudioTracks()[0].enabled = !micMuted;
                 const btn = document.getElementById('btnMic');
@@ -228,7 +260,6 @@
             btn.classList.toggle("danger");
         }
 
-        // --- FUNÇÕES DE CONTROLE DE VOLUME ---
         function changeMicVolume(value) {
             document.getElementById('remoteAudio').volume = value;
         }
@@ -236,6 +267,9 @@
         function changeScreenVolume(value) {
             document.getElementById('remoteVideo').volume = value;
         }
+
+        // Inicializa o app
+        initApp();
     </script>
 </body>
 </html>
