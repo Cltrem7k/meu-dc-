@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Clone - Transmissão Rápida</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #36393f; color: white; margin: 0; padding: 20px; text-align: center; }
+        h1 { margin-bottom: 5px; color: #7289da; }
+        .container { max-width: 900px; margin: 0 auto; background: #2f3136; padding: 20px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        .link-box { background: #202225; padding: 15px; border-radius: 8px; margin: 15px 0; word-break: break-all; }
+        .link-box input { width: 80%; padding: 10px; border: none; border-radius: 5px; background: #40444b; color: white; margin-top: 10px; }
+        button { background-color: #7289da; color: white; border: none; padding: 10px 20px; margin: 5px; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }
+        button:hover { background-color: #5b6eae; }
+        button.danger { background-color: #ed4245; }
+        button.danger:hover { background-color: #c03537; }
+        video { width: 100%; max-height: 600px; background: #000; border-radius: 8px; margin-top: 20px; display: none; }
+        #status { color: #43b581; font-weight: bold; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Transmissão P2P</h1>
+        <div id="status">⏳ Conectando ao servidor...</div>
+
+        <div class="link-box">
+            <strong>Envie este link para seu amigo se conectar:</strong><br>
+            <input type="text" id="inviteLink" readonly onclick="this.select()">
+        </div>
+
+        <div class="controls">
+            <button id="btnMic" onclick="toggleMic()">🎤 Mutar Meu Microfone</button>
+            <button id="btnAudio" onclick="toggleRemoteAudio()">🔈 Mutar Amigo</button>
+            <button id="btnScreen" onclick="shareScreen()">💻 Transmitir Tela (com áudio)</button>
+        </div>
+
+        <!-- Onde a tela do amigo vai aparecer -->
+        <video id="remoteVideo" autoplay playsinline></video>
+        <!-- Áudio do microfone do amigo -->
+        <audio id="remoteAudio" autoplay></audio>
+    </div>
+
+    <script>
+        let peer;
+        let connectedCallId = null;
+        let localMicStream = null;
+        let localScreenStream = null;
+        
+        let micMuted = false;
+        let remoteMuted = false;
+
+        // Inicia o PeerJS
+        peer = new Peer();
+
+        peer.on('open', (id) => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomToJoin = urlParams.get('room');
+            
+            // Gera o link de convite baseado na URL atual
+            const inviteUrl = window.location.origin + window.location.pathname + "?room=" + id;
+            document.getElementById('inviteLink').value = inviteUrl;
+            document.getElementById('status').innerText = "✅ Pronto! Aguardando amigo...";
+
+            // Inicia o microfone automaticamente
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                localMicStream = stream;
+                
+                // Se alguém me mandou um link com ?room=ID, eu conecto nele
+                if (roomToJoin) {
+                    document.getElementById('status').innerText = "🔄 Conectando ao amigo...";
+                    connectToPeer(roomToJoin, localMicStream);
+                }
+            }).catch(err => {
+                alert("Erro ao acessar microfone. Ele é necessário para falar.");
+            });
+        });
+
+        // Quando recebo uma chamada (seja de áudio ou de tela)
+        peer.on('call', (call) => {
+            document.getElementById('status').innerText = "🟢 Conectado!";
+            connectedCallId = call.peer;
+            
+            // Respondo enviando meu microfone
+            call.answer(localMicStream);
+
+            // Quando recebo a mídia (tela ou voz) do amigo
+            call.on('stream', (remoteStream) => {
+                // Se tem vídeo, é compartilhamento de tela
+                if (remoteStream.getVideoTracks().length > 0) {
+                    const videoObj = document.getElementById('remoteVideo');
+                    videoObj.srcObject = remoteStream;
+                    videoObj.style.display = 'block';
+                } 
+                // Se for só áudio, é o microfone dele
+                else {
+                    document.getElementById('remoteAudio').srcObject = remoteStream;
+                }
+            });
+        });
+
+        // Função para iniciar chamada com o amigo
+        function connectToPeer(peerId, stream) {
+            connectedCallId = peerId;
+            const call = peer.call(peerId, stream);
+            
+            call.on('stream', (remoteStream) => {
+                document.getElementById('status').innerText = "🟢 Conectado!";
+                // Mesmo tratamento: separar áudio (mic) de vídeo (tela)
+                if (remoteStream.getVideoTracks().length > 0) {
+                    const videoObj = document.getElementById('remoteVideo');
+                    videoObj.srcObject = remoteStream;
+                    videoObj.style.display = 'block';
+                } else {
+                    document.getElementById('remoteAudio').srcObject = remoteStream;
+                }
+            });
+        }
+
+        // Função de Compartilhar Tela
+        async function shareScreen() {
+            if (!connectedCallId) {
+                alert("Ninguém está conectado com você ainda!");
+                return;
+            }
+            try {
+                // Pede a tela E o áudio do sistema
+                localScreenStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { cursor: "always" },
+                    audio: true // IMPORTANTE: O usuário deve marcar "Compartilhar áudio da aba/sistema" no pop-up do navegador
+                });
+
+                // Faz uma "nova ligação" para o amigo, mas enviando a tela
+                peer.call(connectedCallId, localScreenStream);
+
+                const btn = document.getElementById('btnScreen');
+                btn.innerText = "🛑 Parar Transmissão";
+                btn.classList.add("danger");
+                btn.onclick = stopScreenShare;
+
+                // Se o usuário parar a transmissão pelo botão padrão do navegador
+                localScreenStream.getVideoTracks()[0].onended = () => {
+                    stopScreenShare();
+                };
+
+            } catch (err) {
+                console.error("Erro ao compartilhar tela:", err);
+            }
+        }
+
+        function stopScreenShare() {
+            if (localScreenStream) {
+                localScreenStream.getTracks().forEach(track => track.stop());
+            }
+            const btn = document.getElementById('btnScreen');
+            btn.innerText = "💻 Transmitir Tela (com áudio)";
+            btn.classList.remove("danger");
+            btn.onclick = shareScreen;
+        }
+
+        // Função Mutar MEU microfone (Fala)
+        function toggleMic() {
+            if (localMicStream) {
+                micMuted = !micMuted;
+                // Ativa ou desativa a trilha de áudio
+                localMicStream.getAudioTracks()[0].enabled = !micMuted;
+                const btn = document.getElementById('btnMic');
+                btn.innerText = micMuted ? "🎤 Desmutar Microfone" : "🎤 Mutar Meu Microfone";
+                btn.classList.toggle("danger");
+            }
+        }
+
+        // Função Mutar o AMIGO (Áudio recebido)
+        function toggleRemoteAudio() {
+            remoteMuted = !remoteMuted;
+            document.getElementById('remoteVideo').muted = remoteMuted;
+            document.getElementById('remoteAudio').muted = remoteMuted;
+            
+            const btn = document.getElementById('btnAudio');
+            btn.innerText = remoteMuted ? "🔈 Desmutar Amigo" : "🔈 Mutar Amigo";
+            btn.classList.toggle("danger");
+        }
+    </script>
+</body>
+</html>
