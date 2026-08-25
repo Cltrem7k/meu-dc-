@@ -3,262 +3,205 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discord Clone P2P - Salas</title>
+    <title>WebRTC Discord Clone</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #36393f; color: white; margin: 0; padding: 20px; text-align: center; }
-        h1 { margin-bottom: 5px; color: #7289da; }
-        .container { max-width: 900px; margin: 0 auto; background: #2f3136; padding: 20px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #36393f; color: white; display: flex; height: 100vh; overflow: hidden; }
         
-        /* Telas (Lobby e Sala) */
-        #lobby { display: block; padding: 40px 20px; }
-        #room { display: none; }
-
-        .link-box { background: #202225; padding: 15px; border-radius: 8px; margin: 15px 0; word-break: break-all; }
-        .link-box input { width: 80%; padding: 10px; border: none; border-radius: 5px; background: #40444b; color: white; margin-top: 10px; font-size: 14px; text-align: center;}
+        /* Barra Lateral (Canais) */
+        .sidebar { width: 240px; background-color: #2f3136; padding: 20px 10px; display: flex; flex-direction: column; }
+        .server-name { font-weight: bold; font-size: 16px; margin-bottom: 20px; padding: 0 10px; border-bottom: 1px solid #202225; padding-bottom: 15px;}
+        .channel { padding: 10px; margin: 5px 0; border-radius: 5px; cursor: pointer; color: #8e9297; font-weight: bold; display: flex; align-items: center; gap: 10px; transition: 0.2s;}
+        .channel:hover { background-color: #393c43; color: white; }
+        .channel.active { background-color: #42464d; color: white; }
         
-        button { background-color: #7289da; color: white; border: none; padding: 12px 24px; margin: 5px; border-radius: 5px; cursor: pointer; font-size: 15px; font-weight: bold; transition: 0.2s; }
-        button:hover { background-color: #5b6eae; }
+        /* Área Principal */
+        .main { flex: 1; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; background: #202225; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .link-box input { width: 300px; padding: 8px; border-radius: 5px; border: none; background: #40444b; color: white; }
+        
+        button { background-color: #5865f2; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #4752c4; }
         button.danger { background-color: #ed4245; }
-        button.danger:hover { background-color: #c03537; }
-        button.success { background-color: #43b581; font-size: 18px; padding: 15px 30px; }
         
-        .video-grid { display: flex; gap: 15px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
-        .video-box { background: #202225; padding: 10px; border-radius: 8px; width: 100%; max-width: 420px; }
-        .video-box h3 { font-size: 14px; color: #b9bbbe; margin-top: 0; margin-bottom: 10px; }
-        video { width: 100%; background: #000; border-radius: 5px; aspect-ratio: 16/9; object-fit: cover; }
+        /* Grid de Vídeo */
+        .video-grid { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; }
+        .video-box { background: #202225; padding: 10px; border-radius: 8px; width: 400px; }
+        video { width: 100%; border-radius: 5px; background: black; aspect-ratio: 16/9; object-fit: cover; }
+        .controls { display: flex; gap: 10px; margin-top: 10px; justify-content: center; }
         
-        #status { color: #faa61a; font-weight: bold; margin-bottom: 15px; background: #292b2f; padding: 10px; border-radius: 5px; }
-        .text-success { color: #43b581 !important; }
-        .text-error { color: #ed4245 !important; }
-
-        .volume-control { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; background: #292b2f; padding: 8px; border-radius: 5px; }
-        .volume-control label { font-size: 12px; color: #b9bbbe; font-weight: bold;}
-        input[type=range] { width: 100px; accent-color: #7289da; cursor: pointer; }
+        #status { color: #faa61a; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h1>Meu Servidor de Voz e Tela</h1>
+    <div class="sidebar">
+        <div class="server-name">Meu Servidor</div>
+        <div class="channel active" onclick="joinChannel('geral')">🔊 Geral</div>
+        <div class="channel" onclick="joinChannel('jogos')">🔊 Jogos</div>
+        <div class="channel" onclick="joinChannel('musica')">🔊 Música</div>
+    </div>
 
-        <!-- PÁGINA INICIAL (LOBBY) -->
-        <div id="lobby">
-            <h3>Bem-vindo! Crie uma sala para convidar seus amigos.</h3>
-            <button class="success" onclick="startApp(false)">➕ Criar Nova Sala</button>
+    <div class="main">
+        <div class="header">
+            <div>
+                <span id="status">⏳ Desconectado</span>
+            </div>
+            <div class="link-box">
+                Convite: <input type="text" id="inviteLink" readonly onclick="this.select()">
+            </div>
         </div>
 
-        <!-- DENTRO DA SALA -->
-        <div id="room">
-            <div id="status">⏳ Inicializando microfone e conexões...</div>
+        <div class="controls" style="margin-bottom: 20px;">
+            <button id="btnMic" onclick="toggleMic()">🎤 Mutar Microfone</button>
+            <button id="btnScreen" onclick="shareScreen()">💻 Transmitir Tela</button>
+        </div>
 
-            <div class="link-box">
-                <strong>Envie este link para seu amigo entrar nesta sala:</strong><br>
-                <input type="text" id="inviteLink" readonly onclick="this.select()">
+        <div class="video-grid">
+            <div class="video-box" id="boxLocal" style="display: none;">
+                <h3 style="margin-top:0; font-size: 14px; color: #b9bbbe;">Sua Tela</h3>
+                <video id="localVideo" autoplay playsinline muted></video>
             </div>
 
-            <div class="controls">
-                <button id="btnMic" onclick="toggleMic()">🎤 Mutar Meu Microfone</button>
-                <button id="btnAudio" onclick="toggleRemoteAudio()">🔈 Mutar Amigo</button>
-                <button id="btnScreen" onclick="shareScreen()">💻 Transmitir Tela</button>
-            </div>
-
-            <div class="volume-control" id="micVolumeBox" style="display: none;">
-                <label for="micVolume">🔊 Volume da Voz do Amigo:</label>
-                <input type="range" id="micVolume" min="0" max="1" step="0.05" value="1" oninput="changeMicVolume(this.value)">
-            </div>
-
-            <div class="video-grid">
-                <div class="video-box" id="boxLocal" style="display: none;">
-                    <h3>Sua Transmissão</h3>
-                    <video id="localVideo" autoplay playsinline muted></video>
-                </div>
-
-                <div class="video-box" id="boxRemote" style="display: none;">
-                    <h3>Transmissão do Amigo</h3>
-                    <!-- Trocado para rodar o vídeo corretamente sem travar -->
-                    <video id="remoteVideo" autoplay playsinline></video>
-                    <div class="volume-control">
-                        <label for="screenVolume">🎵 Volume da Live:</label>
-                        <input type="range" id="screenVolume" min="0" max="1" step="0.05" value="1" oninput="changeScreenVolume(this.value)">
-                    </div>
+            <div class="video-box" id="boxRemote" style="display: none;">
+                <h3 style="margin-top:0; font-size: 14px; color: #b9bbbe;">Tela do Amigo</h3>
+                <video id="remoteVideo" autoplay playsinline></video>
+                <div style="margin-top: 10px; text-align: center; color:#b9bbbe; font-size:12px;">
+                    Volume da Live: <input type="range" min="0" max="1" step="0.1" value="1" oninput="document.getElementById('remoteVideo').volume = this.value">
                 </div>
             </div>
+        </div>
 
-            <audio id="remoteAudio" autoplay></audio>
+        <!-- Áudio Oculto -->
+        <audio id="remoteAudio" autoplay></audio>
+        <div id="audioControls" style="display: none; margin-top:20px; text-align:center; color:#b9bbbe; font-size:12px;">
+            Volume da Voz: <input type="range" min="0" max="1" step="0.1" value="1" oninput="document.getElementById('remoteAudio').volume = this.value">
         </div>
     </div>
 
     <script>
         let peer = null;
-        let localMicStream = null;
-        let localScreenStream = null;
-        let connectedPeers = new Set();
+        let localMic = null;
+        let localScreen = null;
+        let currentRoom = null;
         
-        let micMuted = false;
-        let remoteMuted = false;
+        const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-        // Configuração robusta para evitar quedas de conexão
-        const peerConfig = {
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' }
-                ]
-            },
-            debug: 2
-        };
-
-        // Verifica a URL logo que a página carrega
-        window.onload = () => {
-            const urlParams = new URLSearchParams(window.location.search);
-            const roomToJoin = urlParams.get('room');
-            if (roomToJoin) {
-                // Se tem link de sala, pula o lobby e entra direto
-                startApp(roomToJoin);
+        async function initMic() {
+            try {
+                if(!localMic) localMic = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch(e) {
+                console.warn("Microfone sem permissão.");
             }
-        };
-
-        function updateStatus(msg, type = 'normal') {
-            const statusEl = document.getElementById('status');
-            statusEl.innerText = msg;
-            if (type === 'success') statusEl.className = 'text-success';
-            else if (type === 'error') statusEl.className = 'text-error';
-            else statusEl.className = '';
         }
 
-        async function startApp(roomToJoin) {
-            document.getElementById('lobby').style.display = 'none';
-            document.getElementById('room').style.display = 'block';
+        async function joinChannel(channelName) {
+            document.querySelectorAll('.channel').forEach(c => c.classList.remove('active'));
+            event.currentTarget.classList.add('active');
 
-            // Pede o microfone antes de tudo
-            try {
-                localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            } catch (err) {
-                alert("Microfone bloqueado! O aplicativo precisa de áudio para funcionar corretamente.");
-                // Cria áudio vazio para não quebrar o código
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const dst = ctx.createMediaStreamDestination();
-                localMicStream = dst.stream;
-            }
+            document.getElementById('status').innerText = "🔄 Conectando ao " + channelName + "...";
+            document.getElementById('status').style.color = "#faa61a";
+            
+            await initMic();
 
-            // Inicia o PeerJS
-            peer = new Peer(peerConfig);
+            if(peer) peer.destroy(); // Reseta a conexão anterior
+
+            peer = new Peer(config);
 
             peer.on('open', (id) => {
-                // Se eu acabei de criar a sala
-                if (!roomToJoin) {
-                    const inviteUrl = window.location.origin + window.location.pathname + "?room=" + id;
-                    document.getElementById('inviteLink').value = inviteUrl;
-                    updateStatus("✅ Sala criada! Envie o link acima para convidar.", "success");
-                } 
-                // Se eu entrei pelo link do amigo
-                else {
-                    const inviteUrl = window.location.origin + window.location.pathname + "?room=" + roomToJoin;
-                    document.getElementById('inviteLink').value = inviteUrl;
-                    updateStatus("🔄 Conectando à sala do amigo...", "normal");
-                    connectToHost(roomToJoin);
-                }
-            });
-
-            // Previne quedas: Reconecta ao servidor automaticamente se a net piscar
-            peer.on('disconnected', () => {
-                updateStatus("⚠️ Oscilação de rede detectada, reconectando...", "error");
-                peer.reconnect();
-            });
-
-            // Recebendo ligação (seja voz ou tela)
-            peer.on('call', (call) => {
-                connectedPeers.add(call.peer);
-                call.answer(localMicStream); // Responde entregando a própria voz
+                const urlParams = new URLSearchParams(window.location.search);
+                const hostId = urlParams.get('server');
                 
-                handleIncomingStream(call);
-
-                // Se eu já estiver compartilhando tela, envio para quem acabou de entrar
-                if (localScreenStream) {
-                    setTimeout(() => {
-                        // METADATA: Salva o tipo de chamada para o navegador não confundir tela com áudio
-                        peer.call(call.peer, localScreenStream, { metadata: { type: 'screen' } });
-                    }, 1500);
-                }
-            });
-
-            peer.on('error', (err) => {
-                console.error(err);
-                if (err.type === 'peer-unavailable') {
-                    updateStatus("❌ A sala não existe mais ou o anfitrião saiu.", "error");
+                if (!hostId) {
+                    // Eu sou o dono do servidor
+                    const link = window.location.origin + window.location.pathname + "?server=" + id;
+                    document.getElementById('inviteLink').value = link;
+                    document.getElementById('status').innerText = "✅ Conectado (" + channelName + ")";
+                    document.getElementById('status').style.color = "#43b581";
                 } else {
-                    updateStatus("❌ Erro: " + err.type, "error");
+                    // Eu sou o convidado
+                    document.getElementById('inviteLink').value = window.location.href;
+                    connectToHost(hostId);
                 }
             });
+
+            peer.on('call', handleCall);
+            peer.on('disconnected', () => peer.reconnect());
         }
 
-        // Função do CONVIDADO ligando para o DONO da sala
         function connectToHost(hostId) {
-            connectedPeers.add(hostId);
-            // Liga para a pessoa informando que é chamada de VOZ
-            const call = peer.call(hostId, localMicStream, { metadata: { type: 'voice' } });
-            
-            if (call) {
-                handleIncomingStream(call);
-            } else {
-                updateStatus("❌ Falha ao tentar conectar.", "error");
-            }
+            const call = peer.call(hostId, localMic, { metadata: { type: 'voice' }});
+            if(call) handleCall(call);
         }
 
-        // O SEGREDO DA TELA PRETA RESOLVIDO: Separar a mídia corretamente
-        function handleIncomingStream(call) {
-            call.on('stream', (remoteStream) => {
-                
-                // Se a ligação for identificada como "TELA"
+        function handleCall(call) {
+            if(!localMic) return;
+            call.answer(localMic);
+
+            call.on('stream', (stream) => {
+                document.getElementById('status').innerText = "🟢 Chamada Ativa!";
+                document.getElementById('status').style.color = "#43b581";
+
                 if (call.metadata && call.metadata.type === 'screen') {
-                    updateStatus("🟢 Assistindo transmissão!", "success");
-                    const videoObj = document.getElementById('remoteVideo');
-                    videoObj.srcObject = remoteStream;
+                    const vid = document.getElementById('remoteVideo');
+                    vid.srcObject = stream;
                     document.getElementById('boxRemote').style.display = 'block';
-                    
-                    // Força a execução do vídeo para evitar tela preta travada
-                    videoObj.play().catch(e => console.warn("Aguardando interação para tocar o vídeo."));
-                } 
-                
-                // Se a ligação for de VOZ (Ou seja, não é tela)
-                else {
-                    updateStatus("🟢 Conectado! O áudio está rodando.", "success");
-                    const audioObj = document.getElementById('remoteAudio');
-                    audioObj.srcObject = remoteStream;
-                    document.getElementById('micVolumeBox').style.display = 'flex';
+                    vid.play().catch(e => console.log("Aguardando clique para tocar vídeo."));
+                } else {
+                    document.getElementById('remoteAudio').srcObject = stream;
+                    document.getElementById('audioControls').style.display = 'block';
                 }
             });
 
             call.on('close', () => {
-                // Se a ligação caiu
-                if (call.metadata && call.metadata.type === 'screen') {
-                    document.getElementById('boxRemote').style.display = 'none';
-                } else {
-                    updateStatus("❌ Seu amigo saiu da sala.", "error");
-                    document.getElementById('micVolumeBox').style.display = 'none';
+                document.getElementById('boxRemote').style.display = 'none';
+                document.getElementById('status').innerText = "❌ Amigo saiu.";
+                document.getElementById('status').style.color = "#ed4245";
+            });
+        }
+
+        async function shareScreen() {
+            try {
+                localScreen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                document.getElementById('localVideo').srcObject = localScreen;
+                document.getElementById('boxLocal').style.display = 'block';
+                
+                document.getElementById('btnScreen').innerText = "🛑 Parar Tela";
+                document.getElementById('btnScreen').classList.add('danger');
+
+                // Atualiza a tela para todos conectados com a tag 'screen'
+                if(peer && !peer.disconnected) {
+                    Object.values(peer.connections).forEach(conns => {
+                        conns.forEach(conn => {
+                            if(conn.peer) peer.call(conn.peer, localScreen, { metadata: { type: 'screen' }});
+                        });
+                    });
                 }
-Entendo perfeitamente a frustração! Lidar com telas pretas e quedas de conexão em transmissões ao vivo é realmente uma dor de cabeça. Como sou uma inteligência artificial, não tenho como acessar os seus arquivos diretamente. Para corrigir o erro com precisão, **preciso que você cole o seu código aqui**.
 
-Ainda assim, posso te dar a direção exata de como estruturar isso e o que geralmente causa esses problemas.
+                localScreen.getVideoTracks()[0].onended = stopScreen;
+            } catch(e) { console.error(e); }
+        }
 
-### O Link Fixo no GitHub (GitHub Pages)
+        function stopScreen() {
+            if(localScreen) localScreen.getTracks().forEach(t => t.stop());
+            document.getElementById('boxLocal').style.display = 'none';
+            const btn = document.getElementById('btnScreen');
+            btn.innerText = "💻 Transmitir Tela";
+            btn.classList.remove('danger');
+        }
 
-O GitHub Pages é excelente para hospedar a interface (frontend) do seu projeto de forma gratuita e fixa. O formato do seu link geral será sempre: 
-`https://[seu-usuario].github.io/[nome-do-repositorio]/`
+        function toggleMic() {
+            if(localMic) {
+                const track = localMic.getAudioTracks()[0];
+                track.enabled = !track.enabled;
+                const btn = document.getElementById('btnMic');
+                btn.innerText = track.enabled ? "🎤 Mutar Microfone" : "🎤 Desmutar";
+                btn.classList.toggle('danger');
+            }
+        }
 
-**Importante:** O GitHub Pages suporta apenas arquivos estáticos (HTML, CSS e JavaScript no lado do cliente). Como salas de voz e vídeo exigem troca de dados em tempo real (WebRTC, WebSockets), você precisará que o seu código JavaScript no GitHub se conecte a um servidor externo (como Node.js hospedado no Render/Railway) ou use um serviço de terceiros (como **LiveKit**, **Agora.io** ou **PeerJS**).
-
-### Por que a tela fica preta e a conexão cai?
-
-Quando estamos lidando com WebRTC e transmissões ao vivo, esses são os suspeitos mais comuns para os problemas que você descreveu:
-
-*   **Falta de Servidores TURN:** Se a conexão cai de repente ou nem inicia em redes diferentes, é quase certeza que falta configurar um servidor TURN para retransmitir a conexão quando o P2P direto falha.
-*   **Permissões de Mídia:** O navegador bloqueia o vídeo se o usuário não conceder permissão clara para uso da câmera e microfone, resultando em tela preta.
-*   **Anexo do MediaStream:** O código pode estar recebendo o vídeo, mas falhando ao atribuir o `srcObject` à tag `<video>` no HTML.
-*   **Queda do Signaling (WebSocket):** O servidor responsável por apresentar um usuário ao outro perdeu a conexão, derrubando o link da sala.
-
----
-
-Você poderia colar aqui a parte do seu código JavaScript que gerencia a conexão da transmissão e o elemento de vídeo para que eu possa identificar e corrigir o erro exato?
+        // Inicia automaticamente no canal Geral
+        window.onload = () => joinChannel('geral');
+    </script>
+</body>
+</html>
